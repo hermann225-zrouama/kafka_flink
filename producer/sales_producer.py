@@ -5,6 +5,7 @@ import logging
 import random
 import time
 import sys
+import os
 from kafka import KafkaProducer
 
 # Configuration du logging pour afficher les messages de log dans un fichier et sur la console
@@ -21,7 +22,8 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 # Liste des vendeurs
-SELLERS = ['YOPOUGON', 'COCODY', 'YAKRO', 'SAN-PEDRO']
+with open('./villes.txt', 'r') as file:
+    ZONES = [line.strip() for line in file]
 
 # Fonction de callback pour gérer les succès d'envoi de message
 def on_send_success(record_metadata):
@@ -56,9 +58,9 @@ def main(args):
 
         # Générer des données de vente aléatoires
         sales = {
-            'seller_id': random.choice(SELLERS),
-            'amount_usd': random.randrange(100, 1000),
-            'sale_ts': int(time.time() * 1000)
+            'zone_id': random.choice(ZONES),
+            'montant_usd': random.randrange(100, 1000),
+            'vente_ts': int(time.time() * 1000) # horodatage de la vente en millisecondes
         }
 
         # Envoyer le message au topic Kafka

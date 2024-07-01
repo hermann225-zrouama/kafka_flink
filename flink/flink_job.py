@@ -1,8 +1,6 @@
 import os
-
 from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.table import StreamTableEnvironment, EnvironmentSettings
-
 
 def main():
     # Créer un environnement de streaming
@@ -30,9 +28,9 @@ def main():
     #######################################################################
     src_ddl = """
     CREATE TABLE sales_usd (
-        seller_id VARCHAR,
-        amount_usd DOUBLE,
-        sale_ts BIGINT,
+        zone_id VARCHAR,
+        montant_usd DOUBLE,
+        vente_ts BIGINT,
         proctime AS PROCTIME()
     ) WITH (
         'connector' = 'kafka',
@@ -42,8 +40,7 @@ def main():
         'properties.auto.offset.reset' = 'earliest',
         'format' = 'json'
     )
-"""
-
+    """
     tbl_env.execute_sql(src_ddl)
 
     # Créer et initier le chargement de la table source
@@ -53,17 +50,55 @@ def main():
     tbl.print_schema()
 
     #####################################################################
+    # Charger les informations des villes depuis le fichier CSV
+    #####################################################################
+    csv_file_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'villes_cote_divoire.csv')
+
+    villes_ddl = f"""
+    CREATE TABLE villes_info (
+        Ville STRING,
+        Latitude FLOAT,
+        Longitude FLOAT,
+        Population BIGINT,
+        Region STRING
+    ) WITH (
+        'connector' = 'filesystem',
+        'path' = 'file://{csv_file_path}',
+        'format' = 'csv',
+        'csv.ignore-parse-errors' = 'true',
+        'csv.ignore-first-line' = 'true'
+    )
+    """
+    tbl_env.execute_sql(villes_ddl)
+
+    villes_tbl = tbl_env.from_path('villes_info')
+
+    print('\nVilles Schema')
+    villes_tbl.print_schema()
+
+    #####################################################################
     # Définir le calcul d'agrégation de fenêtre tumbling (Ventes par minute par vendeur)
+    # en joignant les données des ventes avec les informations des villes
     #####################################################################
     sql = """
         SELECT
-          seller_id,
-          TUMBLE_END(proctime, INTERVAL '60' SECONDS) AS window_end,
-          SUM(amount_usd) * 0.85 AS window_sales
+          sales_usd.zone_id,
+          TUMBLE_END(sales_usd.proctime, INTERVAL '60' SECONDS) AS fenetre,
+          SUM(sales_usd.montant_usd) * 0.85 AS vente_fenetre,
+          villes_info.Latitude,
+          villes_info.Longitude,
+          villes_info.Population,
+          villes_info.Region
         FROM sales_usd
+        LEFT JOIN villes_info
+        ON sales_usd.zone_id = villes_info.Ville
         GROUP BY
-          TUMBLE(proctime, INTERVAL '60' SECONDS),
-          seller_id
+          TUMBLE(sales_usd.proctime, INTERVAL '60' SECONDS),
+          sales_usd.zone_id,
+          villes_info.Latitude,
+          villes_info.Longitude,
+          villes_info.Population,
+          villes_info.Region
     """
     revenue_tbl = tbl_env.sql_query(sql)
 
@@ -75,9 +110,13 @@ def main():
     ###############################################################
     sink_ddl = """
         CREATE TABLE sales_euros (
-            seller_id VARCHAR,
-            window_end TIMESTAMP(3),
-            window_sales DOUBLE
+            zone_id VARCHAR,
+            fenetre TIMESTAMP(3),
+            vente_fenetre DOUBLE,
+            Latitude FLOAT,
+            Longitude FLOAT,
+            Population BIGINT,
+            Region VARCHAR
         ) WITH (
             'connector' = 'kafka',
             'topic' = 'sales-euros',
@@ -90,8 +129,7 @@ def main():
     # Écrire les agrégations de fenêtres temporelles dans la table de destination
     revenue_tbl.execute_insert('sales_euros').wait()
 
-    tbl_env.execute('windowed-sales-euros')
-
+    tbl_env.execute('vente_par_minute_par_vendeur-euros')
 
 if __name__ == '__main__':
     main()

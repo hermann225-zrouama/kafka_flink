@@ -8,9 +8,6 @@ services:
     command: ["python", "sales_producer.py", "--bootstrap-server", "host.docker.internal:9092", "--topic", "sales-usd"]
     networks:
       - poc
-    depends_on:
-      broker:
-        condition: service_healthy
 
   flink-job:
     build:
@@ -131,7 +128,3 @@ services:
 networks:
   poc:
     driver: bridge
-    ipam:
-        driver: default
-        config:
-            - subnet: "172.18.0.0/16"
