@@ -6,6 +6,7 @@ import random
 import time
 import sys
 import os
+import threading
 from kafka import KafkaProducer
 
 # Configuration du logging pour afficher les messages de log dans un fichier et sur la console
@@ -14,7 +15,7 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S',
     level=logging.INFO,
     handlers=[
-        logging.FileHandler("sales_producer.log"),
+        logging.FileHandler("./logs/sales_producer.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -37,15 +38,15 @@ def on_send_success(record_metadata):
 def on_send_error(excp):
     logger.error('Erreur lors de la production de l\'enregistrement', exc_info=excp)
 
-def main(args):
-    logger.info('Démarrage du producteur de ventes')
+def produce_sales(args, thread_id):
+    logger.info(f'Démarrage du producteur de ventes dans le thread {thread_id}')
     
     # Configuration du producteur Kafka
     producer = KafkaProducer(
         bootstrap_servers=args.bootstrap_server,
         value_serializer=lambda v: json.dumps(v).encode('utf-8'),
         linger_ms=200,
-        client_id='sales-1',
+        client_id=f'sales-{thread_id}',
     )
 
     # S'assurer que tous les messages sont envoyés avant de quitter le programme
@@ -68,20 +69,30 @@ def main(args):
         future.add_callback(on_send_success)  # Ajouter callback en cas de succès
         future.add_errback(on_send_error)    # Ajouter callback en cas d'erreur
 
-        # Si c'est le dixième message, flusher les messages et attendre 5 secondes
+        # Si c'est le dixième message, flusher les messages et attendre 1 seconde
         if is_tenth:
             producer.flush()
-            time.sleep(5)
+            time.sleep(1)
             i = 0  # Réinitialiser le compteur
 
         i += 1
 
-if __name__ == '__main__':
+def main(args):
+    threads = []
+    for thread_id in range(args.num_threads):
+        thread = threading.Thread(target=produce_sales, args=(args, thread_id))
+        threads.append(thread)
+        thread.start()
 
+    for thread in threads:
+        thread.join()
+
+if __name__ == '__main__':
     # Analyse des arguments de la ligne de commande
     parser = argparse.ArgumentParser()
-    parser.add_argument('--bootstrap-server')
-    parser.add_argument('--topic')
+    parser.add_argument('--bootstrap-server', required=True)
+    parser.add_argument('--topic', required=True)
+    parser.add_argument('--num-threads', type=int, default=3, help='Nombre de threads à lancer')
     args = parser.parse_args()
     
     # Appel de la fonction principale avec les arguments analysés
